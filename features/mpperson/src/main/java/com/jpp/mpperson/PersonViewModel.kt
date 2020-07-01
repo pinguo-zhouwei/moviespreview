@@ -1,59 +1,54 @@
 package com.jpp.mpperson
 
 import androidx.lifecycle.LiveData
-import androidx.lifecycle.MediatorLiveData
-import com.jpp.mp.common.coroutines.CoroutineDispatchers
-import com.jpp.mp.common.coroutines.MPScopedViewModel
-import com.jpp.mp.common.navigation.Destination
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.jpp.mpdomain.Person
-import com.jpp.mpperson.PersonInteractor.PersonEvent.AppLanguageChanged
-import com.jpp.mpperson.PersonInteractor.PersonEvent.NotConnectedToNetwork
-import com.jpp.mpperson.PersonInteractor.PersonEvent.Success
-import com.jpp.mpperson.PersonInteractor.PersonEvent.UnknownError
+import com.jpp.mpdomain.usecase.GetPersonUseCase
+import com.jpp.mpdomain.usecase.Try
 import com.jpp.mpperson.PersonRowViewState.Companion.bioRow
 import com.jpp.mpperson.PersonRowViewState.Companion.birthdayRow
 import com.jpp.mpperson.PersonRowViewState.Companion.deathDayRow
 import com.jpp.mpperson.PersonRowViewState.Companion.emptyRow
 import com.jpp.mpperson.PersonRowViewState.Companion.placeOfBirthRow
-import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * [MPScopedViewModel] that supports the person section. The VM retrieves
- * the data from the underlying layers using the provided [PersonInteractor] and maps the business
+ * [ViewModel] that supports the person section. The VM retrieves
+ * the data from the underlying layers and maps the business
  * data to UI data, producing a [PersonViewState] that represents the configuration of the view.
  *
  * This VM is language aware, meaning that when the user changes the language of the device, the
  * VM is notified about such event and executes a refresh of both: the data stored by the application
  * and the view state being shown to the user.
  */
-class PersonViewModel @Inject constructor(
-    dispatchers: CoroutineDispatchers,
-    private val personInteractor: PersonInteractor
-) :
-        MPScopedViewModel(dispatchers) {
+class PersonViewModel(
+    private val getPersonUseCase: GetPersonUseCase,
+    private val ioDispatcher: CoroutineDispatcher,
+    private val savedStateHandle: SavedStateHandle
+) : ViewModel() {
 
-    private val _viewState = MediatorLiveData<PersonViewState>()
-    val viewState: LiveData<PersonViewState> get() = _viewState
+    private val _viewState = MutableLiveData<PersonViewState>()
+    internal val viewState: LiveData<PersonViewState> = _viewState
 
-    private lateinit var currentParam: PersonParam
+    private var personId: Double
+        set(value) = savedStateHandle.set(PERSON_ID_KEY, value)
+        get() = savedStateHandle.get(PERSON_ID_KEY)
+            ?: throw IllegalStateException("Trying to access $PERSON_ID_KEY when it is not yet set")
 
-    private val retry: () -> Unit = { fetchPersonData(currentParam.personName, currentParam.imageUrl, currentParam.personId) }
+    private var personName: String
+        set(value) = savedStateHandle.set(PERSON_NAME_KEY, value)
+        get() = savedStateHandle.get(PERSON_NAME_KEY)
+            ?: throw IllegalStateException("Trying to access $PERSON_NAME_KEY when it is not yet set")
 
-    /*
-     * Map the business logic coming from the interactor into view layer logic.
-     */
-    init {
-        _viewState.addSource(personInteractor.events) { event ->
-            when (event) {
-                is NotConnectedToNetwork -> _viewState.value = PersonViewState.showNoConnectivityError(currentParam.personName, retry)
-                is UnknownError -> _viewState.value = PersonViewState.showUnknownError(currentParam.personName, retry)
-                is Success -> _viewState.value = getViewStateFromPersonData(currentParam.personName, currentParam.imageUrl, event.person)
-                is AppLanguageChanged -> refreshPersonData(currentParam.personName, currentParam.imageUrl, currentParam.personId)
-            }
-        }
-    }
+    private var personImageUrl: String
+        set(value) = savedStateHandle.set(PERSON_IMAGE_URL_KEY, value)
+        get() = savedStateHandle.get(PERSON_IMAGE_URL_KEY)
+            ?: throw IllegalStateException("Trying to access $PERSON_IMAGE_URL_KEY when it is not yet set")
 
     /**
      * Called on VM initialization. The View (Fragment) should call this method to
@@ -61,60 +56,48 @@ class PersonViewModel @Inject constructor(
      * internally verifies the state of the application and updates the view state based
      * on it.
      */
-    fun onInit(param: PersonParam) {
-        updateCurrentDestination(Destination.ReachedDestination(param.personName))
-        currentParam = param
-        fetchPersonData(currentParam.personName, currentParam.imageUrl, currentParam.personId)
+    internal fun onInit(param: PersonParam) {
+        personId = param.personId
+        personName = param.personName
+        personImageUrl = param.imageUrl
+        fetchPersonData()
     }
 
-    /**
-     * When called, this method will push the loading view state and will fetch the data
-     * of the person identified by [personId]. When the fetching process is done, the view state will be updated
-     * based on the result posted by the interactor.
-     */
-    private fun fetchPersonData(personName: String, personImageUrl: String, personId: Double) {
-        withInteractor { fetchPerson(personId) }
-        _viewState.value = PersonViewState.showLoading(personName, personImageUrl)
-    }
+    private fun fetchPersonData() {
+        _viewState.value =
+            PersonViewState.showLoading(personName, personImageUrl)
+        viewModelScope.launch {
+            val result = withContext(ioDispatcher) {
+                getPersonUseCase.execute(personId)
+            }
 
-    /**
-     * Starts a refresh data process by indicating to the interactor that new data needs
-     * to be fetched for the person being shown. This is executed in a background
-     * task while the view state is updated with the loading state.
-     */
-    private fun refreshPersonData(personName: String, personImageUrl: String, personId: Double) {
-        withInteractor {
-            flushPersonData()
-            fetchPerson(personId)
-        }
-        _viewState.value = PersonViewState.showLoading(personName, personImageUrl)
-    }
-
-    /**
-     * Helper function to execute an [action] in the [personInteractor] instance
-     * on a background task.
-     */
-    private fun withInteractor(action: PersonInteractor.() -> Unit) {
-        launch { withContext(dispatchers.default()) { action(personInteractor) } }
-    }
-
-    /**
-     * Creates a [PersonViewState] that represents the data to show from the provided
-     * [person].
-     */
-    private fun getViewStateFromPersonData(personName: String, personImageUrl: String, person: Person): PersonViewState {
-        return when (person.isEmpty()) {
-            true -> PersonViewState.showNoDataAvailable(personName, personImageUrl)
-            else -> PersonViewState.showPerson(personName, personImageUrl, mapPersonData(person))
+            when (result) {
+                is Try.Failure -> processFailure(result.cause)
+                is Try.Success -> processPersonData(result.value)
+            }
         }
     }
 
-    private fun mapPersonData(person: Person): PersonContentViewState {
+    private fun processFailure(cause: Try.FailureCause) {
+        _viewState.value = when (cause) {
+            is Try.FailureCause.NoConnectivity -> _viewState.value?.showNoConnectivityError { fetchPersonData() }
+            else -> _viewState.value?.showUnknownError { fetchPersonData() }
+        }
+    }
+
+    private fun processPersonData(person: Person) {
+        _viewState.value = when (person.isEmpty()) {
+            true -> _viewState.value?.showNoDataAvailable(personImageUrl)
+            else -> _viewState.value?.showPerson(personImageUrl, person.mapToViewState())
+        }
+    }
+
+    private fun Person.mapToViewState(): PersonContentViewState {
         return PersonContentViewState(
-                birthday = person.birthday?.let { birthdayRow(it) } ?: emptyRow(),
-                placeOfBirth = person.place_of_birth?.let { placeOfBirthRow(it) } ?: emptyRow(),
-                deathDay = person.deathday?.let { deathDayRow(it) } ?: emptyRow(),
-                bio = if (person.biography.isEmpty()) emptyRow() else bioRow(person.biography)
+            birthday = birthday?.let { birthdayRow(it) } ?: emptyRow(),
+            placeOfBirth = place_of_birth?.let { placeOfBirthRow(it) } ?: emptyRow(),
+            deathDay = deathday?.let { deathDayRow(it) } ?: emptyRow(),
+            bio = if (biography.isEmpty()) emptyRow() else bioRow(biography)
         )
     }
 
@@ -122,4 +105,10 @@ class PersonViewModel @Inject constructor(
             birthday.isNullOrEmpty() &&
             deathday.isNullOrEmpty() &&
             place_of_birth.isNullOrEmpty()
+
+    private companion object {
+        const val PERSON_ID_KEY = "PERSON_ID_KEY"
+        const val PERSON_NAME_KEY = "PERSON_NAME_KEY"
+        const val PERSON_IMAGE_URL_KEY = "PERSON_IMAGE_URL_KEY"
+    }
 }

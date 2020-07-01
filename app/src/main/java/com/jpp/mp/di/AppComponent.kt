@@ -10,13 +10,15 @@ import javax.inject.Singleton
  * dependency injection of the application.
  */
 @Singleton
-@Component(modules = [
-    AppModule::class,
-    AndroidInjectionModule::class,
-    BuildersModule::class,
-    ViewModelModule::class,
-    DomainLayerModule::class,
-    DataLayerModule::class])
+@Component(
+    modules = [
+        AppModule::class,
+        AndroidInjectionModule::class,
+        BuildersModule::class,
+        NavigationModule::class,
+        DomainLayerModule::class,
+        DataLayerModule::class]
+)
 interface AppComponent {
 
     fun inject(app: MPApp)

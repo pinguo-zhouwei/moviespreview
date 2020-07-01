@@ -87,8 +87,8 @@ class DataLayerModule {
     @Singleton
     fun providesTheMoviesDBRoomDb(context: Context):
             MPRoomDataBase = Room
-            .databaseBuilder(context, MPRoomDataBase::class.java, "MPRoomDataBase")
-            .build()
+        .databaseBuilder(context, MPRoomDataBase::class.java, "MPRoomDataBase")
+        .build()
 
     @Singleton
     @Provides
@@ -117,8 +117,11 @@ class DataLayerModule {
 
     @Singleton
     @Provides
-    fun providesMoviesDb(roomDb: MPRoomDataBase, adapter: RoomModelAdapter, timestampHelper: CacheTimestampHelper):
-            MoviesDb = MoviesCache(roomDb, adapter, timestampHelper)
+    fun providesMoviesDb(
+        roomDb: MPRoomDataBase,
+        adapter: RoomModelAdapter,
+        timestampHelper: CacheTimestampHelper
+    ): MoviesDb = MoviesCache(roomDb, adapter, timestampHelper)
 
     @Singleton
     @Provides
@@ -135,12 +138,18 @@ class DataLayerModule {
 
     @Singleton
     @Provides
-    fun providesConfigurationDb(roomDb: MPRoomDataBase, adapter: RoomModelAdapter, timestampHelper: CacheTimestampHelper):
-            ConfigurationDb = ConfigurationCache(roomDb, adapter, timestampHelper)
+    fun providesConfigurationDb(
+        roomDb: MPRoomDataBase,
+        adapter: RoomModelAdapter,
+        timestampHelper: CacheTimestampHelper
+    ): ConfigurationDb = ConfigurationCache(roomDb, adapter, timestampHelper)
 
     @Singleton
     @Provides
-    fun providesConfigurationRepository(configurationApi: ConfigurationApi, configurationDb: ConfigurationDb):
+    fun providesConfigurationRepository(
+        configurationApi: ConfigurationApi,
+        configurationDb: ConfigurationDb
+    ):
             ConfigurationRepository = ConfigurationRepositoryImpl(configurationApi, configurationDb)
 
     /**********************************
@@ -152,7 +161,8 @@ class DataLayerModule {
 
     @Singleton
     @Provides
-    fun providesSearchRepository(searchApi: SearchApi): SearchRepository = SearchRepositoryImpl(searchApi)
+    fun providesSearchRepository(searchApi: SearchApi): SearchRepository =
+        SearchRepositoryImpl(searchApi)
 
     /**********************************
      ****** PERSON DEPENDENCIES *******
@@ -181,8 +191,11 @@ class DataLayerModule {
 
     @Singleton
     @Provides
-    fun provideCreditsDb(roomDatabase: MPRoomDataBase, adapter: RoomModelAdapter, timestampHelper: CacheTimestampHelper):
-            CreditsDb = CreditsCache(roomDatabase, adapter, timestampHelper)
+    fun provideCreditsDb(
+        roomDatabase: MPRoomDataBase,
+        adapter: RoomModelAdapter,
+        timestampHelper: CacheTimestampHelper
+    ): CreditsDb = CreditsCache(roomDatabase, adapter, timestampHelper)
 
     @Singleton
     @Provides
@@ -223,8 +236,8 @@ class DataLayerModule {
 
     @Singleton
     @Provides
-    fun providesLanguageRepository(languageDb: LanguageDb, languageMonitor: LanguageMonitor):
-            LanguageRepository = LanguageRepositoryImpl(languageDb, languageMonitor)
+    fun providesLanguageRepository(languageDb: LanguageDb):
+            LanguageRepository = LanguageRepositoryImpl(languageDb)
 
     @Singleton
     @Provides
@@ -267,7 +280,8 @@ class DataLayerModule {
 
     @Singleton
     @Provides
-    fun providesAccountRepository(accountApi: AccountApi, accountDb: AccountDb): AccountRepository = AccountRepositoryImpl(accountApi, accountDb)
+    fun providesAccountRepository(accountApi: AccountApi, accountDb: AccountDb): AccountRepository =
+        AccountRepositoryImpl(accountApi, accountDb)
 
     /***************************************
      ****** ACCESS TOKEN DEPENDENCIES ******
@@ -291,11 +305,18 @@ class DataLayerModule {
 
     @Singleton
     @Provides
-    fun providesMovieDetailDb(roomDb: MPRoomDataBase, adapter: RoomModelAdapter, timestampHelper: CacheTimestampHelper): MovieDetailDb = MovieDetailCache(roomDb, adapter, timestampHelper)
+    fun providesMovieDetailDb(
+        roomDb: MPRoomDataBase,
+        adapter: RoomModelAdapter,
+        timestampHelper: CacheTimestampHelper
+    ): MovieDetailDb = MovieDetailCache(roomDb, adapter, timestampHelper)
 
     @Singleton
     @Provides
-    fun providesMovieDetailRepository(movieDetailApi: MovieDetailApi, movieDetailDb: MovieDetailDb): MovieDetailRepository = MovieDetailRepositoryImpl(movieDetailApi, movieDetailDb)
+    fun providesMovieDetailRepository(
+        movieDetailApi: MovieDetailApi,
+        movieDetailDb: MovieDetailDb
+    ): MovieDetailRepository = MovieDetailRepositoryImpl(movieDetailApi, movieDetailDb)
 
     @Singleton
     @Provides
@@ -303,5 +324,6 @@ class DataLayerModule {
 
     @Singleton
     @Provides
-    fun providesMovieStateRepository(movieStateApi: MovieStateApi): MovieStateRepository = MovieStateRepositoryImpl(movieStateApi)
+    fun providesMovieStateRepository(movieStateApi: MovieStateApi): MovieStateRepository =
+        MovieStateRepositoryImpl(movieStateApi)
 }

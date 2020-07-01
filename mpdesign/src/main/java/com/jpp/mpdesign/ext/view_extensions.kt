@@ -30,13 +30,6 @@ fun View.setVisible() {
 }
 
 /**
- * Extension function for the View class to make a View gone
- */
-fun View.setGone() {
-    this.visibility = View.GONE
-}
-
-/**
  * Extension function for the View class to make a View invisible
  */
 fun View.setInvisible() {
@@ -55,6 +48,7 @@ fun DrawerLayout.closeDrawerIfOpen() {
 /**
  * Sets the text appearance of the TextView based on the current API level.
  */
+@SuppressWarnings("deprecation")
 fun TextView.setTextAppearanceCompat(@StyleRes resId: Int) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         this.setTextAppearance(resId)

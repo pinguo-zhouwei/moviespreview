@@ -1,49 +1,27 @@
 package com.jpp.mp.main
 
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import com.jpp.mp.common.livedata.HandledEvent
-import com.jpp.mp.common.livedata.HandledEvent.Companion.of
-import com.jpp.mp.common.navigation.Destination
-import com.jpp.mp.common.navigation.Destination.InnerDestination
-import com.jpp.mp.common.navigation.Destination.MPAccount
-import com.jpp.mp.common.navigation.Destination.MPCredits
-import com.jpp.mp.common.navigation.Destination.MPMovieDetails
-import com.jpp.mp.common.navigation.Destination.MPPerson
-import com.jpp.mp.common.navigation.Destination.MPSearch
-import com.jpp.mp.common.navigation.Destination.MovieListReached
-import com.jpp.mp.common.navigation.Destination.PreviousDestination
-import com.jpp.mp.common.navigation.Destination.ReachedDestination
+import androidx.lifecycle.viewModelScope
 import com.jpp.mpdata.datasources.language.LanguageMonitor
+import com.jpp.mpdomain.SupportedLanguage
 import com.jpp.mpdomain.repository.LanguageRepository
-import javax.inject.Inject
+import com.jpp.mpdomain.repository.SupportRepository
+import java.util.Locale
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * ViewModel used by [MainActivity].
  *
- * Core responsibilities:
- *
- * 1 - Some features implemented in the application requires monitoring some particular APIs of the platform.
- * Since the application's architecture has only one Activity implemented ([MainActivity]), the ViewModel
- * that supports that Activity is the perfect place to start/stop the monitoring of platform dependent
- * APIs. That's a responsibility of the ViewModel.
- *
- * 2 - The application is using the navigation architecture components, with the caveat that needs to
- * show dynamic titles in the Action Bar. This VM takes care of verifying the navigation events
- * and asks the Activity to update the Action Bar's movieTitle.
- *
  */
-class MainActivityViewModel @Inject constructor(
+class MainActivityViewModel(
     private val languageMonitor: LanguageMonitor,
-    private val languageRepository: LanguageRepository
+    private val languageRepository: LanguageRepository,
+    private val supportRepository: SupportRepository,
+    private val locale: LocaleWrapper,
+    private val ioDispatcher: CoroutineDispatcher
 ) : ViewModel() {
-
-    private val _viewState = MutableLiveData<MainActivityViewState>()
-    val viewState: LiveData<MainActivityViewState> get() = _viewState
-
-    private val _moduleNavEvents = MutableLiveData<HandledEvent<ModuleNavigationEvent>>()
-    val moduleNavEvents: LiveData<HandledEvent<ModuleNavigationEvent>> get() = _moduleNavEvents
 
     /**
      * Called on application startup. When called, the VM takes care of initializing
@@ -51,8 +29,9 @@ class MainActivityViewModel @Inject constructor(
      * When [onCleared] is called, the monitoring will be stopped.
      */
     fun onInit() {
-        languageRepository.syncPlatformLanguage()
+        syncAppLanguage()
         languageMonitor.startMonitoring()
+        languageMonitor.addListener { syncAppLanguage() }
     }
 
     /**
@@ -62,72 +41,26 @@ class MainActivityViewModel @Inject constructor(
         languageMonitor.stopMonitoring()
     }
 
-    /**
-     * Called when the user requests to navigate to a particular [destination].
-     */
-    fun onRequestToNavigateToDestination(destination: Destination) {
-        when (destination) {
-            is MPAccount -> ModuleNavigationEvent.NavigateToNodeWithId.toUserAccount()
-            is MPMovieDetails -> ModuleNavigationEvent.NavigateToNodeWithExtras.toMovieDetails(destination)
-            is MPPerson -> ModuleNavigationEvent.NavigateToNodeWithExtras.toPerson(destination)
-            is MPCredits -> ModuleNavigationEvent.NavigateToNodeWithExtras.toCredits(destination)
-            is PreviousDestination -> ModuleNavigationEvent.NavigateToPrevious
-            is InnerDestination -> ModuleNavigationEvent.NavigateToNodeWithDirections(destination.directions)
-            else -> throw IllegalStateException("Unknown navigation requested $destination")
-        }.let {
-            _moduleNavEvents.value = of(it)
+    private fun syncAppLanguage() {
+        viewModelScope.launch {
+            val platformLanguage = locale.getDefault().mapToSupportedLanguage()
+            val appLanguage = withContext(ioDispatcher) {
+                languageRepository.getCurrentAppLanguage()
+            }
+
+            if (platformLanguage != appLanguage) {
+                withContext(ioDispatcher) {
+                    supportRepository.clearAllData()
+                    languageRepository.updateCurrentLanguage(platformLanguage)
+                }
+            }
         }
     }
 
-    /**
-     * Called when a new [Destination] is reached.
-     */
-    fun onDestinationReached(reachedDestination: Destination) {
-        when (reachedDestination) {
-            is ReachedDestination -> renderFeatureViewState(reachedDestination.destinationTitle)
-            is MovieListReached -> renderMovieListViewState(reachedDestination.title)
-            is MPSearch -> renderSearchViewState()
-            is MPCredits -> renderFeatureViewState(reachedDestination.movieTitle)
-            else -> throw IllegalStateException("Unknown navigation requested $reachedDestination")
+    private fun Locale.mapToSupportedLanguage(): SupportedLanguage {
+        return when (language) {
+            locale.localeFrom(SupportedLanguage.Spanish.id).language -> SupportedLanguage.Spanish
+            else -> SupportedLanguage.English
         }
-    }
-
-    /**
-     * Called when the user navigates to the search feature.
-     * When called, this method will post a new [MainActivityViewState]
-     * to update the search bar state.
-     */
-    private fun renderSearchViewState() {
-        _viewState.value = MainActivityViewState(
-                sectionTitle = "",
-                menuBarEnabled = false,
-                searchEnabled = true
-        )
-    }
-
-    /**
-     * Called when the user navigates internally in a feature module.
-     * When called, this method will post a new [MainActivityViewState] that
-     * contains the title of the feature being navigated.
-     */
-    private fun renderFeatureViewState(sectionName: String) {
-        _viewState.value = MainActivityViewState(
-                sectionTitle = sectionName,
-                menuBarEnabled = false,
-                searchEnabled = false
-        )
-    }
-
-    /**
-     * Called when the user navigates to a particular movie list section.
-     * When called, it will post a new [MainActivityViewState] that contains
-     * the name of the section being shown.
-     */
-    private fun renderMovieListViewState(sectionName: String) {
-        _viewState.value = MainActivityViewState(
-                sectionTitle = sectionName,
-                menuBarEnabled = true,
-                searchEnabled = false
-        )
     }
 }

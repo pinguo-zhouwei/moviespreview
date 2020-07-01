@@ -1,6 +1,7 @@
 package com.jpp.mpabout
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -9,19 +10,22 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.databinding.DataBindingUtil
-import androidx.lifecycle.Observer
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
 import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.jpp.mp.common.extensions.cleanView
+import com.jpp.mp.common.extensions.observeHandledEvent
+import com.jpp.mp.common.extensions.observeValue
 import com.jpp.mp.common.extensions.send
+import com.jpp.mp.common.extensions.setScreenTitle
 import com.jpp.mp.common.extensions.web
-import com.jpp.mp.common.extensions.withViewModel
-import com.jpp.mp.common.fragments.MPFragment
+import com.jpp.mp.common.viewmodel.MPGenericSavedStateViewModelFactory
 import com.jpp.mpabout.databinding.FragmentAboutBinding
-import com.jpp.mpabout.databinding.ListItemAboutBinding
 import com.jpp.mpdesign.ext.getColor
-import kotlinx.android.synthetic.main.fragment_about.*
+import dagger.android.support.AndroidSupportInjection
+import javax.inject.Inject
 
 /**
  * Fragment used to show the about section oof the application.
@@ -30,33 +34,57 @@ import kotlinx.android.synthetic.main.fragment_about.*
  * and show the about data. The VM will perform the fetch and will update the UI states
  * represented by [AboutViewState] and this Fragment will render those updates.
  */
-class AboutFragment : MPFragment<AboutViewModel>() {
-    private lateinit var viewBinding: FragmentAboutBinding
+class AboutFragment : Fragment() {
+
+    @Inject
+    lateinit var viewModelFactory: AboutViewModelFactory
+
+    private var viewBinding: FragmentAboutBinding? = null
+
+    private val viewModel: AboutViewModel by viewModels {
+        MPGenericSavedStateViewModelFactory(
+            viewModelFactory,
+            this
+        )
+    }
+
+    private var aboutRv: RecyclerView? = null
+
+    override fun onAttach(context: Context) {
+        AndroidSupportInjection.inject(this)
+        super.onAttach(context)
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         viewBinding = DataBindingUtil.inflate(inflater, R.layout.fragment_about, container, false)
-        return viewBinding.root
+        return viewBinding?.root
     }
 
-    override fun onActivityCreated(savedInstanceState: Bundle?) {
-        super.onActivityCreated(savedInstanceState)
-        withViewModel {
-            viewState.observe(viewLifecycleOwner, Observer { viewState ->
-                viewBinding.viewState = viewState
-                aboutRv.apply {
-                    layoutManager = LinearLayoutManager(context)
-                    adapter = AboutItemsAdapter(viewState.content.aboutItems) { withViewModel { onUserSelectedAboutItem(it) } }
-                    addItemDecoration(DividerItemDecoration(context, (layoutManager as LinearLayoutManager).orientation))
-                }
-            })
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        aboutRv = view.findViewById(R.id.aboutRv)
+        viewModel.viewState.observeValue(viewLifecycleOwner, ::renderViewState)
+        viewModel.navEvents.observeHandledEvent(viewLifecycleOwner, ::handleNavEvent)
+        viewModel.onInit()
+    }
 
-            navEvents.observe(viewLifecycleOwner, Observer { it.actionIfNotHandled { navEvent -> processNavEvent(navEvent) } })
+    override fun onDestroyView() {
+        viewBinding = null
+        aboutRv = null
+        super.onDestroyView()
+    }
 
-            onInit(getString(R.string.about_top_bar_title))
+    private fun renderViewState(viewState: AboutViewState) {
+        setScreenTitle(getString(viewState.screenTitle))
+        viewBinding?.viewState = viewState
+        aboutRv?.apply {
+            layoutManager = LinearLayoutManager(context)
+            adapter = AboutItemsAdapter(viewState.content.aboutItems) { viewModel.onUserSelectedAboutItem(it) }
+            addItemDecoration(DividerItemDecoration(context, (layoutManager as LinearLayoutManager).orientation))
         }
     }
 
-    private fun processNavEvent(navEvent: AboutNavEvent) {
+    private fun handleNavEvent(navEvent: AboutNavEvent) {
         when (navEvent) {
             is AboutNavEvent.InnerNavigation -> navigateInnerBrowser(navEvent.url)
             is AboutNavEvent.OpenGooglePlay -> goToRateAppScreen(navEvent.url)
@@ -69,11 +97,9 @@ class AboutFragment : MPFragment<AboutViewModel>() {
         try {
             startActivity(Intent().cleanView(uriString))
         } catch (e: ActivityNotFoundException) {
-            withViewModel { onFailedToOpenPlayStore() }
+            viewModel.onFailedToOpenPlayStore()
         }
     }
-
-    override fun withViewModel(action: AboutViewModel.() -> Unit) = withViewModel<AboutViewModel>(viewModelFactory) { action() }
 
     private fun goToShareAppScreen(uriString: String) {
         startActivity(Intent().send(getString(R.string.share_app_text, uriString)))
@@ -90,33 +116,6 @@ class AboutFragment : MPFragment<AboutViewModel>() {
                 setStartAnimations(it, R.anim.activity_enter_transition, R.anim.activity_exit_transition)
                 setExitAnimations(it, R.anim.activity_enter_transition, R.anim.activity_exit_transition)
             }.build().launchUrl(it, Uri.parse(uriString))
-        }
-    }
-
-    class AboutItemsAdapter(private val items: List<AboutItem>, private val itemSelectionListener: (AboutItem) -> Unit) : RecyclerView.Adapter<AboutItemsAdapter.ViewHolder>() {
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            return ViewHolder(
-                    DataBindingUtil.inflate(
-                            LayoutInflater.from(parent.context),
-                            R.layout.list_item_about,
-                            parent,
-                            false
-                    )
-            )
-        }
-
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            holder.bindItem(items[position], itemSelectionListener)
-        }
-
-        override fun getItemCount(): Int = items.size
-
-        class ViewHolder(private val itemBinding: ListItemAboutBinding) : RecyclerView.ViewHolder(itemBinding.root) {
-            fun bindItem(item: AboutItem, selectionListener: (AboutItem) -> Unit) {
-                itemBinding.viewState = item
-                itemBinding.executePendingBindings()
-                itemView.setOnClickListener { selectionListener(item) }
-            }
         }
     }
 }

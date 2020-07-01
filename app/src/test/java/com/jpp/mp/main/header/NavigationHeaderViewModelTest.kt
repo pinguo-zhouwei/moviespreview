@@ -1,19 +1,26 @@
 package com.jpp.mp.main.header
 
 import android.view.View
-import androidx.lifecycle.MediatorLiveData
 import com.jpp.mp.R
-import com.jpp.mp.common.navigation.Destination
-import com.jpp.mp.main.TestCoroutineDispatchers
 import com.jpp.mpdomain.Gravatar
+import com.jpp.mpdomain.Session
 import com.jpp.mpdomain.UserAccount
 import com.jpp.mpdomain.UserAvatar
+import com.jpp.mpdomain.repository.SessionRepository
+import com.jpp.mpdomain.usecase.GetUserAccountUseCase
+import com.jpp.mpdomain.usecase.Try
+import com.jpp.mptestutils.CoroutineTestExtension
 import com.jpp.mptestutils.InstantTaskExecutorExtension
 import com.jpp.mptestutils.observeWith
-import io.mockk.every
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.impl.annotations.RelaxedMockK
 import io.mockk.junit5.MockKExtension
-import io.mockk.verify
+import io.mockk.mockk
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.BroadcastChannel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -22,29 +29,47 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 
-@ExtendWith(MockKExtension::class, InstantTaskExecutorExtension::class)
+@ExperimentalCoroutinesApi
+@ExtendWith(
+        MockKExtension::class,
+        InstantTaskExecutorExtension::class,
+        CoroutineTestExtension::class
+)
 class NavigationHeaderViewModelTest {
 
     @RelaxedMockK
-    private lateinit var interactor: NavigationHeaderInteractor
+    private lateinit var getUserAccountUseCase: GetUserAccountUseCase
+
+    @RelaxedMockK
+    private lateinit var navigator: HeaderNavigator
+
+    @RelaxedMockK
+    private lateinit var sessionRepository: SessionRepository
+
+    private val sessionRepositoryUpdates: BroadcastChannel<Session?> = BroadcastChannel(Channel.CONFLATED)
 
     private lateinit var subject: NavigationHeaderViewModel
 
-    private val interactorEvents = MediatorLiveData<NavigationHeaderInteractor.HeaderDataEvent>()
-
     @BeforeEach
     fun setUp() {
-        every { interactor.userAccountEvents } returns interactorEvents
-        subject = NavigationHeaderViewModel(TestCoroutineDispatchers(), interactor)
+        coEvery { sessionRepository.sessionStateUpdates() } returns sessionRepositoryUpdates
+        subject = NavigationHeaderViewModel(
+            getUserAccountUseCase,
+            navigator,
+            sessionRepository,
+            CoroutineTestExtension.testDispatcher
+        )
     }
 
     @Test
     fun `Should post login state when user not logged`() {
         var viewStatePosted: HeaderViewState? = null
 
+        coEvery { getUserAccountUseCase.execute() } returns Try.Failure(Try.FailureCause.UserNotLogged)
+
         subject.viewState.observeWith { viewState -> viewStatePosted = viewState }
 
-        interactorEvents.postValue(NavigationHeaderInteractor.HeaderDataEvent.UserNotLogged)
+        subject.onInit()
 
         assertNotNull(viewStatePosted)
         assertEquals(View.INVISIBLE, viewStatePosted?.loadingVisibility)
@@ -59,11 +84,11 @@ class NavigationHeaderViewModelTest {
     fun `Should post login state when error detected`() {
         var viewStatePosted: HeaderViewState? = null
 
+        coEvery { getUserAccountUseCase.execute() } returns Try.Failure(Try.FailureCause.Unknown)
+
         subject.viewState.observeWith { viewState -> viewStatePosted = viewState }
 
-        interactorEvents.postValue(NavigationHeaderInteractor.HeaderDataEvent.UserNotLogged)
-
-        interactorEvents.postValue(NavigationHeaderInteractor.HeaderDataEvent.UnknownError)
+        subject.onInit()
 
         assertNotNull(viewStatePosted)
         assertEquals(View.INVISIBLE, viewStatePosted?.loadingVisibility)
@@ -84,9 +109,11 @@ class NavigationHeaderViewModelTest {
                 username = "anAccount"
         )
 
+        coEvery { getUserAccountUseCase.execute() } returns Try.Success(userAccount)
+
         subject.viewState.observeWith { viewState -> viewStatePosted = viewState }
 
-        interactorEvents.postValue(NavigationHeaderInteractor.HeaderDataEvent.Success(userAccount))
+        subject.onInit()
 
         assertNotNull(viewStatePosted)
         assertEquals(View.INVISIBLE, viewStatePosted?.loadingVisibility)
@@ -111,9 +138,11 @@ class NavigationHeaderViewModelTest {
                 username = "anAccount"
         )
 
+        coEvery { getUserAccountUseCase.execute() } returns Try.Success(userAccount)
+
         subject.viewState.observeWith { viewState -> viewStatePosted = viewState }
 
-        interactorEvents.postValue(NavigationHeaderInteractor.HeaderDataEvent.Success(userAccount))
+        subject.onInit()
 
         viewStatePosted?.let {
             viewStatePosted?.accountViewState?.avatarViewState?.avatarErrorCallback?.invoke()
@@ -134,44 +163,14 @@ class NavigationHeaderViewModelTest {
     }
 
     @Test
-    fun `Should post loading and get account info in onInit`() {
-        var viewStatePosted: HeaderViewState? = null
-
-        subject.viewState.observeWith { viewState -> viewStatePosted = viewState }
-
-        subject.onInit()
-
-        assertNotNull(viewStatePosted)
-        assertEquals(View.VISIBLE, viewStatePosted?.loadingVisibility)
-        assertEquals(View.GONE, viewStatePosted?.accountViewState?.visibility)
-        assertEquals(View.GONE, viewStatePosted?.detailsViewState?.visibility)
-
-        assertEquals(View.GONE, viewStatePosted?.loginButtonViewState?.visibility)
-
-        verify { interactor.getUserAccountData() }
+    fun `Should refresh data when user logs out`() = runBlocking {
+        sessionRepositoryUpdates.send(null)
+        coVerify { getUserAccountUseCase.execute() }
     }
 
     @Test
-    fun `Should request navigation to account details when onNavigateToLoginSelected`() {
-        val expectedDestination = Destination.MPAccount
-
-        var requestedDestination: Destination? = null
-
-        subject.navigationEvents.observeWith { it.actionIfNotHandled { dest -> requestedDestination = dest } }
-        subject.onNavigateToLoginSelected()
-
-        assertEquals(expectedDestination, requestedDestination)
-    }
-
-    @Test
-    fun `Should request navigation to account details when onNavigateToAccountDetailsSelected`() {
-        val expectedDestination = Destination.MPAccount
-
-        var requestedDestination: Destination? = null
-
-        subject.navigationEvents.observeWith { it.actionIfNotHandled { dest -> requestedDestination = dest } }
-        subject.onNavigateToAccountDetailsSelected()
-
-        assertEquals(expectedDestination, requestedDestination)
+    fun `Should refresh data when user logs in`() = runBlocking {
+        sessionRepositoryUpdates.send(mockk())
+        coVerify { getUserAccountUseCase.execute() }
     }
 }

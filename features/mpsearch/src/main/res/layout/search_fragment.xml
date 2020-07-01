@@ -4,7 +4,7 @@
     <data>
         <variable
             name="viewState"
-            type="com.jpp.mpsearch.SearchViewState" />
+            type="com.jpp.mpsearch.SearchContentViewState" />
     </data>
 
     <androidx.constraintlayout.widget.ConstraintLayout xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -63,7 +63,7 @@
             android:id="@+id/searchResultRv"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            app:animatedVisibility="@{viewState.contentViewState.searchResultsVisibility}"
+            android:visibility="@{viewState.contentViewState.searchResultsVisibility}"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintLeft_toLeftOf="parent"
             app:layout_constraintRight_toRightOf="parent"

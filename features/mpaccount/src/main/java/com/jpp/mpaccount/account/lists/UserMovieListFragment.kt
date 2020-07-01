@@ -1,22 +1,23 @@
 package com.jpp.mpaccount.account.lists
 
+import android.content.Context
 import android.os.Bundle
-import android.os.Parcelable
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.databinding.DataBindingUtil
-import androidx.lifecycle.Observer
-import androidx.paging.PagedListAdapter
-import androidx.recyclerview.widget.DiffUtil
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.jpp.mp.common.extensions.getScreenWidthInPixels
-import com.jpp.mp.common.extensions.withViewModel
-import com.jpp.mp.common.fragments.MPFragment
+import com.jpp.mp.common.extensions.observeValue
+import com.jpp.mp.common.extensions.setScreenTitle
+import com.jpp.mp.common.paging.MPVerticalPagingHandler
+import com.jpp.mp.common.viewmodel.MPGenericSavedStateViewModelFactory
 import com.jpp.mpaccount.R
 import com.jpp.mpaccount.databinding.FragmentUserMovieListBinding
-import com.jpp.mpaccount.databinding.ListItemUserMovieBinding
+import dagger.android.support.AndroidSupportInjection
+import javax.inject.Inject
 
 /**
  * Base fragment used to show the list of movies that are related to the user's account.
@@ -28,101 +29,65 @@ import com.jpp.mpaccount.databinding.ListItemUserMovieBinding
  * This Fragment shows the movies list based on the configuration that is sent as parameter when
  * created. It can show all three categories, based on such parameters.
  */
-class UserMovieListFragment : MPFragment<UserMovieListViewModel>() {
+class UserMovieListFragment : Fragment() {
 
-    private lateinit var viewBinding: FragmentUserMovieListBinding
+    @Inject
+    lateinit var viewModelFactory: UserMovieListViewModelFactory
 
-    // used to restore the position of the RecyclerView on view re-creation
-    private var rvState: Parcelable? = null
+    private var viewBinding: FragmentUserMovieListBinding? = null
 
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
-        viewBinding = DataBindingUtil.inflate(inflater, R.layout.fragment_user_movie_list, container, false)
-        return viewBinding.root
+    private val viewModel: UserMovieListViewModel by viewModels {
+        MPGenericSavedStateViewModelFactory(
+            viewModelFactory,
+            this
+        )
     }
 
-    override fun onActivityCreated(savedInstanceState: Bundle?) {
-        super.onActivityCreated(savedInstanceState)
+    private var userMoviesList: RecyclerView? = null
 
-        rvState = savedInstanceState?.getParcelable(USER_MOVIES_RV_STATE_KEY) ?: rvState
-
-        withViewModel {
-            viewState.observe(this@UserMovieListFragment.viewLifecycleOwner, Observer { viewState ->
-                viewBinding.viewState = viewState
-                viewBinding.executePendingBindings()
-
-                withRecyclerView {
-                    layoutManager = LinearLayoutManager(requireActivity()).apply { onRestoreInstanceState(rvState) }
-                    adapter = UserMoviesAdapter { item ->
-                        withViewModel { onMovieSelected(item) }
-                    }.apply { submitList(viewState.contentViewState.movieList) }
-                }
-            })
-
-            onInit(UserMovieListParam.fromArguments(
-                    arguments,
-                    resources,
-                    getScreenWidthInPixels(),
-                    getScreenWidthInPixels())
-            )
-        }
+    override fun onAttach(context: Context) {
+        AndroidSupportInjection.inject(this)
+        super.onAttach(context)
     }
 
-    override fun onPause() {
-        withRecyclerView { rvState = layoutManager?.onSaveInstanceState() }
-        super.onPause()
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View? {
+        viewBinding =
+            DataBindingUtil.inflate(inflater, R.layout.fragment_user_movie_list, container, false)
+        return viewBinding?.root
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        withRecyclerView { outState.putParcelable(USER_MOVIES_RV_STATE_KEY, layoutManager?.onSaveInstanceState()) }
-        super.onSaveInstanceState(outState)
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        setUpViews(view)
+        viewModel.viewState.observeValue(viewLifecycleOwner, ::renderViewState)
+        viewModel.onInit(UserMovieListType.fromArguments(arguments))
     }
 
-    override fun withViewModel(action: UserMovieListViewModel.() -> Unit) = withViewModel<UserMovieListViewModel>(viewModelFactory) { action() }
+    override fun onDestroyView() {
+        viewBinding = null
+        userMoviesList = null
+        super.onDestroyView()
+    }
 
-    private fun withRecyclerView(action: RecyclerView.() -> Unit) = view?.findViewById<RecyclerView>(R.id.userMoviesList)?.let(action)
-
-    class UserMoviesAdapter(private val itemSelectionListener: (UserMovieItem) -> Unit) : PagedListAdapter<UserMovieItem, UserMoviesAdapter.ViewHolder>(UserMovieDiffCallback()) {
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            return ViewHolder(
-                    DataBindingUtil.inflate(
-                            LayoutInflater.from(parent.context),
-                            R.layout.list_item_user_movie,
-                            parent,
-                            false
-                    )
-            )
-        }
-
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            getItem(position)?.let {
-                holder.bindMovieItem(it, itemSelectionListener)
+    private fun setUpViews(view: View) {
+        userMoviesList = view.findViewById<RecyclerView>(R.id.userMoviesList)?.apply {
+            layoutManager = LinearLayoutManager(requireActivity())
+            adapter = UserMoviesAdapter { item -> viewModel.onMovieSelected(item) }
+            val pagingHandler = MPVerticalPagingHandler(layoutManager as LinearLayoutManager) {
+                viewModel.onNextPageRequested()
             }
-        }
-
-        class ViewHolder(private val itemBinding: ListItemUserMovieBinding) : RecyclerView.ViewHolder(itemBinding.root) {
-            fun bindMovieItem(item: UserMovieItem, itemSelectionListener: (UserMovieItem) -> Unit) {
-                with(itemBinding) {
-                    viewState = item
-                    executePendingBindings()
-                }
-                itemView.setOnClickListener { itemSelectionListener(item) }
-            }
+            addOnScrollListener(pagingHandler)
         }
     }
 
-    class UserMovieDiffCallback : DiffUtil.ItemCallback<UserMovieItem>() {
-
-        override fun areItemsTheSame(oldItem: UserMovieItem, newItem: UserMovieItem): Boolean {
-            return oldItem.title == newItem.title
-        }
-
-        override fun areContentsTheSame(oldItem: UserMovieItem, newItem: UserMovieItem): Boolean {
-            return oldItem.title == newItem.title
-        }
-    }
-
-    private companion object {
-        const val USER_MOVIES_RV_STATE_KEY = "userMoviesRvStateKey"
+    private fun renderViewState(viewState: UserMovieListViewState) {
+        setScreenTitle(getString(viewState.screenTitle))
+        viewBinding?.viewState = viewState
+        viewBinding?.executePendingBindings()
+        (userMoviesList?.adapter as UserMoviesAdapter).submitList(viewState.contentViewState.movieList)
     }
 }
